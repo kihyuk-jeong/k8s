@@ -235,3 +235,169 @@
 - init Container 는 어떠한 작업을 하고 반드시 종료가 되어야 함
 - 쿠버네티스는 init Container 가 정상적으로 종료되지 않으면 다음 작업을 수행하지 않는다.
 
+### Scheduler
+
+쿠버네티스는 여러가지 이유로 인해서 파드가 신규 노드에 배치가 되어야 한다면, 스케쥴러에 의해 배치될 노드가 결정된다.
+
+1. 필터링 : 파드를 배치할 수 없는 노드를 거르는 과정
+    - 파드를 배치할 수 없는 상태는 여러가지가 있는데, 디스크가 가득 찬 노드나 패치와 같은 이슈로 사용이 불가능한 노드를 걸러낸다.
+  
+   
+<img width="687" alt="스크린샷 2023-11-14 오후 11 07 15" src="https://github.com/kihyuk-jeong/k8s/assets/39195377/c2549fb2-9620-408e-89d9-0fbac723def3">
+
+
+
+2.스코어링 : 파드를 노드에 배치하고 나면 남은 자원이 어느정도일지, 또는 이미 동일한 파드가 특정 노드에 배치되어있는지 등등 여러 요소를 고려하여 스코어를 매겨서 가장 적합한 노드를 결정한다.
+→ 결정이 완료되면 kubelet 에 의해 노드 내부에 파드가 생성된다.
+
+<img width="681" alt="스크린샷 2023-11-14 오후 11 07 29" src="https://github.com/kihyuk-jeong/k8s/assets/39195377/4ec66f6f-1498-4c3a-a0b5-2348c5263d1b">
+
+
+-> 쿠버네티스에 의해 배치된 파드는 대부분 최적의 노드에 배치되었을 확률이 높으며, 설령 최적이 아니더라도 파드가 제거/생성을 반복하면서 최적의 노드를 찾아가기 때문에 개발자의 입장에서 크게 신경쓸 부분이 많지 않다.
+
+**Node Selector**
+
+파드에 배치될 노드를 Selector 를 이용하여 직접 결정할 수 있다.
+
+- 모든 조건을 만족하는 경우에만 배치한다.
+
+```yaml
+spec:
+	nodeSelector:
+		hw-type: gpu
+		cost: high
+```
+
+- 이 경우 hw-type 이 gpu 이고 cost 가 high 를 만족하는 Selector 가 존재하는 경우에만 배치를 한다.
+- 만약 모든 조건 중 하나라도 일치하지 않는다면 파드는 pending 상태로 만족하는 조건이 생길 때 까지 대기한다.
+
+**Taint and Tolerations**
+
+**Taint**
+
+- NoSchedule : 파드가 스케줄 되지 않음 (즉, 파드가 배치되지 않음)
+- PreferNoSchedule : 되도록 파드를 배치하지 않음
+- NoExecute : 이미 있는 파드도 모두 제거함
+
+**Tolerations**
+
+**Taint** 옵션으로 인해 죽은 Node 가 되어버리는 것을 방지하기 위해, Pod 가 **Taint** 를 무시할 수 있는 옵션이다.
+
+- 즉, **Taint 옵션이 NoSchedule 이라면,** 기본적으로 파드를 배치하지 않되, **Tolerations** 스펙에 부합하는 경우에는 파드를 배치 하라는 선언
+
+```yaml
+spec:
+	tolerations:
+	-	key: "hw-type"
+		operator: "Equal"
+		value: "gpu"
+		effect: "NoSchedule"
+```
+
+- 모든 tolerations 조건이 만족해야 Taint 를 무시하고 파드의 배치가 가능하다.
+
+**Pod Disruption Budget (PDB)**
+
+자발적인 종료 상황에서도 유지할 파드 수를 지정
+
+```yaml
+sepc:
+	minAvailable: 2
+```
+
+---
+
+### ReplicaSet and Deployment
+
+```yaml
+$ kubectl apply -f my-simple-pod.yaml
+-> pod/my-simple-pod created
+$ kubectl apply -f my-simple-pod.yaml
+-> pod/my-simple-pod unchanged
+$ kubectl apply -f my-simple-pod.yaml
+-> pod/my-simple-pod unchanged
+```
+
+→ 첫 번째 명령어 이후에는 아무리 동일한 명령어를 실행해도 파드의 개수가 추가되거나 하지 않는다.
+
+- 만약 스펙이 바뀌었다면, 바뀐 스펙으로 적용이 된다.
+- 쿠버네티스가 파드를 식별하는 방법은 metadata 의 name 값으로, 이 값을 다르게 설정해서 여러 번 apply 명령어를 실행하는 경우 동일한 파드를 추가할 수 있다.
+    
+    → but, 관리가 너무 어려워진다. 무엇보다도 파드 수를 늘리기 위해 spec 을 계속해서 만들어야 하고, 제거할 때도 스펙 하나하나를 관리해야 한다.
+    
+
+**그래서 제공하는 ReplicaSet**
+
+여러 파드의 복제본을 생성하고 관리할 수 있는 객체
+
+```yaml
+appVersion: apps/v1
+kind: ReplicaSet
+metadata:
+	name: nginx-replicaset
+spec:
+	replicas: 3
+	selector:
+		matchLabels:
+			app: nginx
+	template:
+		metadata:
+			labels:
+				app: nginx
+		spec:
+			containers:
+			- name: nginx
+				image: nginx:1.17
+```
+
+- template 아래에 있는 metadata 와 spec 은 replicaSet 에 의해 만들어지는 파드의 스펙이다.
+- replicaSet 의 아쉬운 점 중 하나는 image 의 버전을 관리해주지 않는다는 점이다.
+    - 예를 들어 nginx:1.17 을 1.18 버전으로 변경해도, replicaSet 은 파드의 개수만 보기 때문에 버전까지 관리해주지는 않는다.
+
+**ReplicaSet 의 부족한 부분을 보완해주는 Deployment**
+
+<img width="619" alt="스크린샷 2023-11-14 오후 11 08 03" src="https://github.com/kihyuk-jeong/k8s/assets/39195377/a8f2498b-8915-44e0-916e-9752908d65d4">
+
+
+Deployment 와 ReplicaSet 은 단독으로 사용되는 경우는 거의 없고, 함께 쓰인다.
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+	name: my-deployment
+spec:
+	replicas: 3
+	strategy:
+		type: RollingUpdate
+		rollingUpdate:
+			maxSurge: 1
+			maxUnavailable: 1
+
+// 아래는 replicaSet 설정
+	selector:
+		matchLabels:
+			app: nginx
+	template:
+		metadata:
+			labels:
+				app: nginx
+		spec:
+			containers:
+			- name: nginx
+				image: nginx:1.17
+```
+
+**strategy : 파드를 업데이트 해야 하는 상황이 발생했을 때, 어떤 방식으로 업데이트를 할 것인가.**
+
+- Recreate : 모든 파드를 한 번에 교체하는 전략
+→ 파드가 전체 종료되면 서비스가 중단될 수 있음
+- RollingUpdate : 각각의 파드를 순차적으로 업데이트 하는 전략
+    - 무중단으로, 일반적인 서비스에서 선호되는 전략
+    - readiness probe 로 pod 의 상태를 check 하면서 교체한다.
+    - 단점으로는 파드가 순차적으로 교체되는 과정에서 클라이언트의 호출에 대한 결과값이 상이할 수 있다는 점. (예를 들어, 두 번 호출한다고 가정하면 첫 번째 호출은 이전 버전, 두 번째 호출은 최신 버전)
+- maxSurge: 업데이트 하는 동안 파드가 얼마나 더 생성될 수 있는지
+- maxUnavailable: 업데이트 하는 동안 파드가 얼마나 줄어들 수 있는지
+
+→ 즉, 롤링업데이트 되는 동안 파드의 총 수는 `replicas - maxUnavailable ~ replcias + maxSurge`
+
