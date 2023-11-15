@@ -271,6 +271,8 @@ spec:
 - 이 경우 hw-type 이 gpu 이고 cost 가 high 를 만족하는 Selector 가 존재하는 경우에만 배치를 한다.
 - 만약 모든 조건 중 하나라도 일치하지 않는다면 파드는 pending 상태로 만족하는 조건이 생길 때 까지 대기한다.
 
+
+
 **Taint and Tolerations**
 
 **Taint**
@@ -304,6 +306,81 @@ spec:
 sepc:
 	minAvailable: 2
 ```
+
+**Node Affinity**
+
+노드의 선택을 조금 더 구체적으로 지정하는 기능 
+→ (총 2개가 있는데 이름 자체가 매우 길다..)
+→ 하지만 자세히 보면 앞 단어만 다르다! (required, preferred)
+
+- requiredduringscheduling**Ignoredduringexecution**
+    
+    ```yaml
+    spec:
+    	affinity:
+    		nodeAffinity:
+    			requiredduringscheduling**Ignoredduringexecution:
+    				nodeSelectorTerms:
+    				- matchExpression:
+    					-key: hw-type
+    						operator: In
+    						values:
+    						- gpu**
+    ```
+    
+    - requiredduringscheduling : 반드시 모든 조건을 만족해야 한다.
+    - Ignoredduringexecution **:**  단, 이미 실행중인 파드는 제외한다.
+    → 즉, 이미 실행중인 파드는 그대로 냅두고 신규로 생성되는 파드는 아래 조건을 지키며 워커노드에 배치가 되어야 한다.
+    - 참고로 **matchExpression** 는 여러 개 존재할 수 있는데 이는 or 조건으로 여러 조건 중 하나만 일치해도 된다.
+- preferredduringscheduling**Ignoredduringexecution**
+    
+    ```yaml
+    spec:
+    	affinity:
+    		nodeAffinity:
+    			preferredduringscheduling**Ignoredduringexecution:
+    			- weight: 10
+    				perference:
+    				- matchExpression:
+    					-key: hw-type
+    						operator: In
+    						values:
+    						- gpu
+    			- weight: 20
+    				perference:
+    				- matchExpression:
+    					-key: sw-type
+    						operator: In
+    						values:
+    						- temp**
+    ```
+    
+    - preferredduringscheduling : 선호하는 조건의 가중치를 두고 가장 높은 선호도를 가진 조건에 해당하는 노드에 우선적으로 파드를 배치한다.
+    - Ignoredduringexecution **:**  단, 이미 실행중인 파드는 제외한다.
+    → 즉, 이미 실행중인 파드는 그대로 냅두고 신규로 생성되는 파드는 아래 조건을 지키며 워커노드에 배치가 되어야 한다.
+
+**PodAffinity, PodAntiAffinity**
+
+파드를 **`이런 노드에 배치하고 싶다 또는 이런 노드는 피했으면 좋겠다.` 를 지정**
+
+```yaml
+spec:
+	affinity:
+		podAntiAffinity:
+			preferredDuringSchedulingIgnoredDuringExecution:
+			- weight: 100
+				podAffinityTerm:
+					labelSelector:
+						matchExpressions:
+							- key : type
+								operator: In
+								values:
+								- frontend
+					topologyKey: "kubernetes.io/hostname"
+```
+
+위 파일을 해석해보면, 해당 파드가 배치되지 않았으면 하는 노드에 가중치를 부여하고 matchExpressions 조건에 해당하는 노드에는 **최대한** 배치하지 않는 정책이다.
+→ type 이 frontend  인 파드가 많이 배치된 노드는 피해주세요!
 
 ---
 
