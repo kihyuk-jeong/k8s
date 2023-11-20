@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-deploy
+spec:
+  replicas: 3
+  
+  # 파드를 update 할 때 파드 교체 전략 
+  # (Recreate : 모든 파드 한 번에 교체 / 순간 모든 파드가 종료됨)
+  # (RollingUpdate : 각각의 파드를 순차적으로 교체 / 무중단)
+  strategy:
+    # type: Recreate
+    type: RollingUpdate
+    # maxSurge : 업데이트 하는 과정에서 최대 1 개의 파드가 추가로 생성
+    # maxUnavailable : 업데이트 하는 과정에서 파드는 최대 1개를 줄일 수 있음
+      maxSurge: 1
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+      - name: my-container
+        image: nginx:1.17

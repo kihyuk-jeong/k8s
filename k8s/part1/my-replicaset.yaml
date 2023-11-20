@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: nginx-replicaset
+spec:
+  replicas: 3
+  
+  # 이 replicSet 이 관리하는 파드는 key 가 app 이고 value 가 nginx 인 파드다.
+  selector: 
+    matchLabels:
+      app: nginx
+  # replicaSet 에 의해 만들어지는 파드의 스펙을 정의하며 보통은 파드의 스펙을 그대로 쓴다.
+  template: 
+    metadata:
+      labels:
+        app: nginx
+    spec: 
+      containers:
+      - name: nginx
+        image: nginx:1.18
