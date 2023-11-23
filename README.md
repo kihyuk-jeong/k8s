@@ -498,7 +498,7 @@ spec:
 
 파드의 고유 아이덴티티를 보장해주는 객체
 
-- Deployment 와 다르게 파드들의 순서 및 고유성을 보장한ㄷ.
+- Deployment 와 다르게 파드들의 순서 및 고유성을 보장한다
 - 예를들어 Redis 의 고가용성을 보장하기 위해 3개의 파드를 띄우고, writer 용 1개, Read 용 2개를 사용하고자 하는 경우 이를 식별하기 위해 각각의 파드가 고유한 아이덴티티를 가지고 있어야 한다.
 - StatefulSet 은 Deployment 와 다르게 랜덤으로 파드가 선택되지 않는다. 파드의 목적에 맞게 트래픽을 받아야 하기 때문에 특정 파드와 직접 통신해야 하는 경우가 많다.
 - Pod의 IP는 생성시마다 달라지는데 이를 매번 찾아서 접속할수 없기 때문에, 이럴 경우 Headless Service를 사용한다.
@@ -506,3 +506,92 @@ spec:
 
 <img width="646" alt="스크린샷 2023-11-20 오후 11 05 13" src="https://github.com/kihyuk-jeong/k8s/assets/39195377/62a6237f-6a3f-467a-a2c7-5536a3cb3245">
 
+### Job
+
+어떤 작업을 처리하고 종료될 파드를 관리하는 객체 
+
+남는 자원을 사용해서 배치를 돌릴 수 있음 (별도의 배치 서버 없이)
+
+```yaml
+apiVersion: apps/v1
+kind: Pod
+metadata:
+	name: batch-pod
+spec:
+	restartPolicy: OnFailure
+	containers:
+	- name: batch-job
+		image: my_batch
+```
+
+만약 batch 프로세스를 일반적인 pod 로 사용한다면, restartPolicy 를 OnFailure 또는 Never 로 설정하고, 배치가 완료된 이후 컨테이너가 종료되면 자동으로 삭제되지 않기 때문에 수동으로 삭제해야 한다.
+
+→ Job 객체를 사용하면 어떤 작업을 처리하고 종료된 이후 Pod 를 관리(삭제) 한다.a
+
+```yaml
+apiVersion: batch/v1
+kind: job
+metadata:
+	name: my-simple-job
+spec:
+	activeDeadlineSeconds: 60
+	ttlSecondsAfterFinished: 20
+	parallelism: 2
+	completions: 5
+	backoffLimit: 4
+	template:
+		spec:
+			containers:
+			- name: my-container
+				image: busybox
+				command: ["sh", "-c", "sleep 10"]
+			restartPlicy: OnFailure
+```
+
+- parallelism : 동시에 몇 개의 파드를 실행할지 결정
+→ 병렬처리가 필요하지 않은 경우 1로 설정한다.
+- completions : 동일한 작업을 총 몇 번 수행할지 결정
+- backoffLimit: 작업의 재시작 정책으로, 설정한 횟수 만큼 재시도 한다.
+→ default 는 6으로, 만약 실패했을 때 재시작 하면 안되는 배치인 경우 1로 설정해줘야 한다.
+- activeDeadlineSeconds : 작업을 수행할 수 있는 최대 시간 (N 초 안에 작업이 끝나지 않으면 실패처리 한다.)
+→ 참고로 해당 설정은 backoffLimit 과 서로 다른 목적을 가지고 있다. 만약 Job 이 중간에 실패해서 backoffLimit 에 설정한 횟수만큼 재시작 하더라도, activeDeadlineSeconds 시간을 초과하면 재시도 하는 중간에 Job 을 실패처리 해버린다.
+- ttlSecondsAfterFinished : 종료된 작업을 정리해주는 시간으로, 작업이 완료되면 설정한 시간 이후 파드를 제거해준다.
+
+### CronJob
+<img width="446" alt="스크린샷 2023-11-23 오후 11 33 12" src="https://github.com/kihyuk-jeong/k8s/assets/39195377/02747bca-d814-4dff-8f4b-a8f252d63a23">
+
+
+
+```yaml
+appVersion: batch/v1
+kind: CronJob
+metadata: 
+	name: my-cronjob
+spec:
+	startingDeadlineSeconds: 200
+	concurrencyPolicy: Forbid
+	schedule: "0 * * * *"
+	jobTemplate: 
+		spec: 
+			template:
+				spec:
+					containers:
+					- name: my-container
+						image: busybox
+						command: ["echo", "sleep 10"]
+					restartPolicy: OnFailure
+```
+
+- concurrencyPolicy : 크론 주기로 Job 을 실행하는데, 이전 Job 이 아직 완료되지 않았을 때 어떻게 처리할지에 대한 정책
+    - Allow: 이미 실행중인 작업이 있어도 새 작업을 실행
+    - Forbid: 이미 실행중인 작업이 끝나면 새 작업을 실행
+    - Replace: 이미 실행중인 작업을 강제 종료하고 새 작업으로 대체 (새 작업 실행)
+- startingDeadlineSeconds : 위와 같이 스케쥴이 밀렸을 때, 얼마나 기다릴지 설정
+→ 예를 들어 concurrencyPolicy 를 Forbid 로 설정하고 스케쥴이 밀리게 되었을 때, 얼마나 기다릴지 결정한다. 만약 startingDeadlineSeconds 가 경과되었는데도 다음 스케쥴을 실행할 수 없는 상황이라면, 해당 스케쥴은 실패한다. 
+(but, 해당 Job 자체가 실패하는건 아님. 다음 스케쥴이 오면 정상적으로 실행)
+
+**장점: 워커노드의 남는 공간에 효율적으로 배치 프로세스를 실행할 수 있다.**
+
+**정산 배치나 통계 배치와 같은 하루에 N 번씩 도는 배치의 처럼 단독으로 pod 를 구성할 경우 사용이 용이해 보이지만, 별도의 batch 서버를 두고 여러 개의 Job 을 외부 툴(ex. jenkins, github-action)로 cronJob 을 설정해서 사용하는 batch 의 경우에는 오히려 관리포인트가 증가할 수 있을 거 같다.**
+
+→ 결론 : Job 과 CronJob 모두 크게 인기 있는 객체는 아님.
