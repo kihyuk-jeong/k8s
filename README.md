@@ -595,3 +595,57 @@ spec:
 **정산 배치나 통계 배치와 같은 하루에 N 번씩 도는 배치의 처럼 단독으로 pod 를 구성할 경우 사용이 용이해 보이지만, 별도의 batch 서버를 두고 여러 개의 Job 을 외부 툴(ex. jenkins, github-action)로 cronJob 을 설정해서 사용하는 batch 의 경우에는 오히려 관리포인트가 증가할 수 있을 거 같다.**
 
 → 결론 : Job 과 CronJob 모두 크게 인기 있는 객체는 아님.
+
+### 환경변수
+
+쿠버네티스 입장 :  환경 변수는 스펙에 정적으로 정의하여 컨테이너 내부에 주입 가능한 `변수`
+
+개발자의 입장 : 애플리케이션 빌드와 배포 없이 변경할 수 있는 설정
+
+애플리케이션의 입장 : 가장 높은 우선순위를 가지며 가용성과 성능을 따지지 않아도 됨
+
+`환경변수` 는 **컨테이너** 레벨의 스펙
+
+<img width="424" alt="스크린샷 2023-12-11 오후 11 12 37" src="https://github.com/kihyuk-jeong/k8s/assets/39195377/a117e712-43c6-4f6d-9ac9-4f732fd9f4f3">
+
+
+- 파드 내 여러 컨테이너가 존재한다면, 각 컨테이너 마다 독립적인 환경 변수를 가져간다.
+
+---
+
+### ConfigMap and Secret
+
+ConfigMap : 일반적으로 공개되어도 상관 없는 정보를 저장
+
+- Database Host / Database User
+
+Secret : 외부에 공개되면 안 되는 설정값을 저장
+
+- ex) Database PW
+- 기본적인 명령어로는 Value 를 보여주지 않음
+- 설정을 통해 etcd 에 저장할 때 암호화 해서 저장할 수 있음
+- 기본적으로 base64 인코딩이 되어 있기 때문에 값이 사고로 노출되어도 원문이 바로 유출되지 않음
+→ 크게 의미는 없음. 순간적인 노출 방지 수준
+    
+    ```yaml
+    
+    apiVersion: v1
+    kind: Secret
+    metadata:
+    	name: my-secret
+    # 일반적인 key-value 형태의 설정으로, 대부분 이 타입을 사용한다.
+    type: Opaque
+    # data 는 기본적으로 base64 인코딩 처리
+    data: 
+    	DB_PW : bXIWAJIOCJOIZAo=
+    
+    # stringData 는 평문 형태로 저장
+    stringData:
+    	API_KEY: ABCD-1234-5678-QWER
+    
+    ```
+
+<img width="466" alt="스크린샷 2023-12-11 오후 11 12 59" src="https://github.com/kihyuk-jeong/k8s/assets/39195377/29c356cb-d2de-451a-a2a4-ac86ae5b194b">
+
+
+→ 환경 변수와 차이점은 컨테이너 단위가 아닌 Pod 단위로 변수들을 관리할 수 있다는 점으로, 해당 값이 변경되는 경우 모든 Pod 에 적용할 수 있다.
