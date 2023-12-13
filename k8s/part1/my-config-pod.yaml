@@ -1,0 +1,21 @@
+# configMap 과 secret 을 적용한 pod
+appVersion: v1
+kind: Pod
+metadata: 
+  name: my-config-pod
+spec: 
+  containers: 
+  - name: my-container
+    image: nginx
+    env:
+    - name: DB_HOST
+      valueFrom:
+        configMapKeyRef:
+        # my-configmap.yaml 에서 정의한 metadata 이름 및 key 값
+          name: my-config
+          key: db_host
+    - name: DB_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: my-secret
+          key: DB_PW
