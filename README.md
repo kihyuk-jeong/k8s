@@ -649,3 +649,132 @@ Secret : 외부에 공개되면 안 되는 설정값을 저장
 
 
 → 환경 변수와 차이점은 컨테이너 단위가 아닌 Pod 단위로 변수들을 관리할 수 있다는 점으로, 해당 값이 변경되는 경우 모든 Pod 에 적용할 수 있다.
+
+## Volume 과 Ephemeral Volume
+
+volume 은 쿠버네티스에서 사용하는 저장소로 container 에 종속적인 존재는 아님
+
+(spec 을 보면 containers 와 volume 이 동일한 level 로 정의되어 있음)
+
+- Volume Mount : volume 을 원하는 컨테이너와 연결하는 것
+- Ephemeral Volume : pod 와 라이프사이클을 동일하게 사져가는 볼륨
+    - emptyDir, hostPath, configMap, secret
+    - volume + configMap 의 조합으로 사용하면, configMap 의 원본 파일의 수정 없이 특정 pod 의 환경에 맞게 조절해서 사용할 수 있다.
+    - emptyDir 은 동일한 Pod 내 서로 다른 컨테이너들이 데이터를 공유할 필요가 있을 때 사용한다. 예를 들어 컨테이너가 파일을 생성하고, 다른 컨테이너가 그 파일을 읽거나 처리하는 경우에 유용하다. (+임시 파일이나 캐시 데이터 저장 등등)
+- Persistent Volume : Pod 의 라이프사이클과  관계 없이 영구적으로 보존되는 저장소
+    - 일반적으로 노드와 무관하게 Pod 에 연결될 수 있는 저장장치
+
+**Ephemeral Volume 예시**
+
+```yaml
+apiVersion: v1
+kind: pod
+metadata:
+	name: my-pod
+spec:
+	containers:
+	- name: my-container
+		image: my-image
+		volumeMounts:
+		- name: config-volume
+			mountPath: /config-files
+	volumes:
+	- name: config-volume
+		configMap:
+			name: my-config
+			items:
+			- key: "welcome-script"
+				path: "welcome.sh"
+```
+
+**volumes 정의**
+
+- volumes 아래에 볼륨의 이름을 정의하고, my-config 라는 이름을 가진 configMap 을 사용한다.
+- 여러개의 설정값 들이 존재하는데, 그 중에서 **welomce-script** 라는 key 를 가진 설정값들을 [welcome.sh](http://welcome.sh) 라는 파일로 변환을 한다. 
+( = welomce-script 를 key 로 갖는 value 들은 String 형태로, 이 문자열들을 welcome.sh 라는 파일로 저장한다.)
+
+**volumeMounts 정의**
+
+- 정의한 볼륨을 컨테이너와 연결하기 위해, containers 아래에 volumeMounts 를 정의한다.
+- volumeMounts 의 name 은 연결하려는 volume 의 name 과 동일해야 한다.
+- mountPath 는 연결한 volume 이 컨테이너 내부에 어떤 디렉토리에 연결될 것인지 정의한다
+
+**Persistent Volume** 
+
+<img width="668" alt="스크린샷 2023-12-17 오후 10 36 06" src="https://github.com/kihyuk-jeong/k8s/assets/39195377/10108974-27fb-477c-add0-ddecac321419">
+
+
+- PV 는 이미 생성되어 있는 저장소를 사용하는 static Provisioning 과 필요할 때 생성해서 사용하는 Dynamic Provisioning 이 존재한다.
+- Static Provisioning 의 경우 이미 만들어진 저장소 중 어떤 저장소를 사용할지 지정해야 한다.
+- Dynamic Provisioning 의 경우 필요한 시점에 저장소의 spec 등을 지정하고 요청해야 한다.
+
+→ 이러한 정책을 **persistent volume claim** 이라는 Object 에 정의해야 한다. 즉, Container 와 PV 의 mount 과정은 아래와 같이 PVC 단계가 하나 더 추가되는 것이다. (동적 프로비저닝)
+
+<img width="667" alt="스크린샷 2023-12-17 오후 10 36 18" src="https://github.com/kihyuk-jeong/k8s/assets/39195377/ccddb87b-88ab-4b0a-8c43-6bb9e3460ebd">
+
+
+```yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+	name: my-pv-500
+psec:
+	capacity:
+		storage: 500Mi
+	accessModes:
+	- ReadWriteMany
+	persistentVolumeReclaimPolicy: Retain
+	hostPath:
+		path: "/my-pv/data/pv1"
+```
+
+- accessModes
+    - ReadWriteMany : 여러 노드에서 접근이 가능하며 읽기와 쓰기 모두 가능
+    - ReadOnlyMany : 여러 노드에서 접근이 가능하며 읽기만 가능
+    - ReadWriteOnce : 하나의 노드에서만 읽고 쓸 수 있는 저장 공간이며, 다른 Node 에서는 접근이 불가능하도 동일 Node 에 있는 Pod 들만 접근이 가능
+    - ReadWriteOncePod : 특정 파드에서만 접근 가능한 영구 볼륨 (임시 볼륨과 동일하지만 라이프사이클이 다름)
+- persistentVolumeReclaimPolicy : 해당 볼륨의 라이프사이클이 종료되었을 때, 내부에 존재하는 파일들을 어떻게 처리할지에 대한 정책
+    - Retain : 유지
+    - Delete: 삭제
+    - Recycle : 재사용 (현재 deprecated)
+- hostPath : PV 경로
+    - 개발 환경에서만 임시로 사용하는 용도로, 실제 운영 환경에서는 AWS EBS 등의 실제 경로를 기입
+
+**PersistentVolume Claim**
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+	name: my-pvc-100
+spec:
+	accessModes: 
+	- ReadWriteMany
+resoureces:
+	requests:
+		storage: 100Mi
+```
+<img width="379" alt="스크린샷 2023-12-17 오후 10 36 46" src="https://github.com/kihyuk-jeong/k8s/assets/39195377/ff6a2dac-a8fd-4617-83a3-d0a8d9eb874a">
+
+
+- 위와 같이 정의된 PVC 오브젝트는 사전에 생성된 PV 의 스펙과 가장 적합한 볼륨이 선택된다.
+- 만약 적합한 볼륨이 여러개가 존재한다면, 준비된 PV 중에서 가장 작은 용량의 PV 를 할당시켜 준다.
+(limit 옵션으로 일정 규모 이상의 PV 는 할당에서 제외시킬 수 있다.)
+- 만약 조건에 적합한 PV 가 존재하지 않는다면 Pending 상태로 대기하면서 적합한 PV가 생성될 때 까지 대기한다.
+
+(Pod 에 PVC 로 볼륨 정의 예시)
+
+```yaml
+....
+volumes:
+- name: my-storage
+	persistentVolumeClaim:
+		claimName: my-pvc-100
+```
+
+**정적 프로비저닝 활용**
+
+- pod의 스케일을 고려하면 정적 프로비저닝 사용 자체가 약간 제한적임
+- ReadWriteMany 혹은 ReadOnlyMany 형태의 공유 저장소로 활용
+- Pod 마다 독립적인 저장소가 필요하다면 임시 볼륨의 활용이 적합함
+- 만약 DB 처럼 파드 단위로 할당되는 영구 스토리지가 필요한 경우 StatefulSet 활용
